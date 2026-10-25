@@ -59,10 +59,22 @@ class Advisor:
         self.cfg = cfg
         self.storage = storage or Storage(cfg.db_path)
         self.judge = judge or NewsJudge(cfg)
-        self.aliases = load_aliases(cfg.bundled_data)
-        self.feeds = news.load_feeds(cfg.bundled_data)
+        self.problems: list[str] = []
+        self.aliases = load_aliases(cfg.find_file("aliases.json"))
+        if not self.aliases:
+            self.problems.append("нет файла aliases.json — новости по компаниям искать не по чему")
+        feeds_path = cfg.find_file("feeds.json")
+        if feeds_path is None:
+            self.problems.append("нет файла feeds.json — беру ленты по умолчанию (РБК, Интерфакс, Google News)")
+        self.feeds = news.load_feeds(feeds_path)
         self.matcher = news.Matcher(self.aliases)
-        self.levels = self.select_model()
+        try:
+            self.levels = self.select_model()
+        except FileNotFoundError as e:
+            self.problems.append(f"модель не найдена: {e}. Положите книгу в репозиторий как model/model.xlsx")
+            self.levels = {"issuers": [], "assumptions": {}, "version": None, "_origin": "none"}
+        for p in self.problems:
+            log.warning(p)
         self.feed_status: dict[str, str] = {}
         self.http = httpx.AsyncClient()
 
@@ -73,7 +85,7 @@ class Advisor:
         Если в GitHub появилась новая версия книги — действует она. Если вы прислали книгу в чат
         после последнего обновления GitHub — действует присланная, пока в GitHub не появится новая.
         """
-        bundled = load_bundled(self.cfg.bundled_data)
+        bundled = load_bundled(self.cfg.search_dirs())
         seen = self.storage.get("github_version_seen")
         override = load_override(self.cfg.data_dir)
         if bundled.get("version") != seen:
@@ -92,7 +104,7 @@ class Advisor:
     def pending_announcement(self) -> tuple[str, str | None] | None:
         """Если действующая модель ещё не отправлялась владельцу — текст прогноза и путь к книге."""
         ver = self.levels.get("version")
-        if ver and ver == self.storage.get("announced_version"):
+        if not self.issuers() or (ver and ver == self.storage.get("announced_version")):
             return None
         prev = self.storage.get("announced_snapshot")
         return self.announcement_text(prev), self.model_file()
@@ -160,7 +172,7 @@ class Advisor:
         self.mark_announced()
         return (
             f"✅ Принял книгу «{esc(filename)}» ({len(new['issuers'])} бумаг). Она действует, пока в GitHub не появится новая версия.\n"
-            "Чтобы модель не потерялась, положите этот же файл в репозиторий: data/model.xlsx.\n\n" + text
+            "Чтобы модель не потерялась, положите этот же файл в репозиторий: model/model.xlsx.\n\n" + text
         )
 
     # ------------------------------------------------------------ прогноз
@@ -225,6 +237,8 @@ class Advisor:
 
     # ------------------------------------------------------------ котировки
     async def fetch_prices(self) -> dict[str, dict]:
+        if not self.tickers():
+            return {}
         prices = await market.fetch_shares(self.http, self.tickers())
         self.storage.set("last_quotes", {"at": now().isoformat(), "prices": prices})
         return prices
@@ -423,7 +437,7 @@ class Advisor:
                 f"золото ${rub(a.get('gold_usd'))}, мир {a.get('p_peace', 0):.0%} через {a.get('t_peace', 0):.0f} лет."
             )
         return "🎯 <b>Уровни из модели</b>\n<pre>" + esc("\n".join(rows)) + "</pre>" + tail + \
-            "\n<i>Подробный прогноз — /forecast. Модель обновляется через GitHub: data/model.xlsx.</i>"
+            "\n<i>Подробный прогноз — /forecast. Модель обновляется через GitHub: model/model.xlsx.</i>"
 
     def news_text(self, hours: int = 24, min_level: int = 1, limit: int = 15) -> str:
         rows = self.storage.recent_news(hours, min_level)
@@ -454,7 +468,7 @@ class Advisor:
     async def health_text(self) -> str:
         lines = ["🩺 <b>Проверка бота</b>"]
         try:
-            p = await market.fetch_shares(self.http, self.tickers()[:2])
+            p = await market.fetch_shares(self.http, (self.tickers() or ["SBER"])[:2])
             sample = ", ".join(f"{k} {v['price']}" for k, v in p.items())
             lines.append(f"Мосбиржа: ok ({sample})")
         except Exception as e:  # noqa: BLE001
@@ -470,8 +484,12 @@ class Advisor:
         lines.append(f"GigaChat: {esc(await self.judge.ping())}")
         origin = {"github": "из GitHub", "chat": "присланная в чат"}.get(self.levels.get("_origin"), "")
         lines.append(f"Модель: {len(self.issuers())} бумаг, {origin}, файл {esc(self.levels.get('source', 'levels.json'))}, версия {esc(self.levels.get('version', ''))}")
+        if self.levels.get("_where"):
+            lines.append(f"Папка модели на сервере: {esc(self.levels['_where'])}")
         if self.levels.get("_warning"):
             lines.append(f"⚠️ {esc(self.levels['_warning'])}")
+        for p in self.problems:
+            lines.append(f"⚠️ {esc(p)}")
         lines.append(f"Данные бота: {esc(self.cfg.data_dir)}")
         lines.append(
             "Расписание: котировки в " + ", ".join(t.strftime("%H:%M") for t in self.cfg.quote_times)

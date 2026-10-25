@@ -1,0 +1,12 @@
+{
+ "general": [
+  {"name": "РБК", "url": "https://rssexport.rbc.ru/rbcnews/news/30/full.rss"},
+  {"name": "Интерфакс", "url": "https://www.interfax.ru/rss.asp"},
+  {"name": "Коммерсантъ", "url": "https://www.kommersant.ru/RSS/news.xml"},
+  {"name": "ТАСС", "url": "https://tass.ru/rss/v2.xml"},
+  {"name": "Ведомости", "url": "https://www.vedomosti.ru/rss/news"},
+  {"name": "Прайм", "url": "https://1prime.ru/export/rss2/index.xml"}
+ ],
+ "google_news": true,
+ "google_news_template": "https://news.google.com/rss/search?q={query}+when:2d&hl=ru&gl=RU&ceid=RU:ru"
+}

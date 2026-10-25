@@ -37,7 +37,7 @@ HELP = """Я слежу за котировками и новостями по �
 • итоги дня — вечером
 • прогноз целиком — раз в неделю и каждый раз, когда модель обновилась
 
-<b>Обновить модель</b> — положите новую книгу в репозиторий как data/model.xlsx: хостинг перезапустит меня, и я пришлю новый прогноз.
+<b>Обновить модель</b> — положите новую книгу в репозиторий как model/model.xlsx: хостинг перезапустит меня, и я пришлю новый прогноз.
 Можно и прислать книгу сюда — она будет действовать, пока в GitHub не появится новая версия."""
 
 
@@ -75,6 +75,14 @@ async def send(context, text: str) -> None:
 async def reply(update: Update, text: str) -> None:
     for part in split_message(text):
         await update.effective_message.reply_text(part, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+
+
+def problems_note(adv: Advisor) -> str:
+    if not adv.problems:
+        return ""
+    from .service import esc
+
+    return "\n\n⚠️ <b>Что не так с файлами на сервере</b>\n" + "\n".join(f"• {esc(p)}" for p in adv.problems)
 
 
 async def send_model_file(bot, chat_id: int, adv: Advisor, caption: str = "Книга действующей модели") -> bool:
@@ -115,14 +123,15 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply(
             update,
             f"Готово, я запомнил вас как владельца. Ваш chat id: <code>{chat_id}</code>.\n"
-            "Надёжнее прописать его в настройках хостинга как OWNER_CHAT_ID — тогда он не потеряется при перезапуске.\n\n" + HELP,
+            "Надёжнее прописать его в настройках хостинга как OWNER_CHAT_ID — тогда он не потеряется при перезапуске.\n\n" + HELP + problems_note(adv),
         )
         await announce_if_pending(context.bot, adv, chat_id)
         return
     if owner_id(context) != chat_id:
         await reply(update, "Это личный бот.")
         return
-    await reply(update, HELP)
+    await reply(update, HELP + problems_note(adv))
+    await announce_if_pending(context.bot, adv, chat_id)
 
 
 @owner_only
@@ -141,7 +150,7 @@ async def cmd_forecast(update, context):
 async def cmd_model(update, context):
     adv: Advisor = context.application.bot_data["advisor"]
     if not await send_model_file(context.bot, update.effective_chat.id, adv):
-        await reply(update, "Книги модели у меня нет — работаю по data/levels.json. Положите книгу в репозиторий как data/model.xlsx.")
+        await reply(update, "Книги модели у меня нет — работаю по data/levels.json. Положите книгу в репозиторий как model/model.xlsx.")
 
 
 @owner_only

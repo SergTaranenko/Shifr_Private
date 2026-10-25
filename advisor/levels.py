@@ -176,50 +176,57 @@ def _parse_issuer_sheet(wb, ticker: str) -> dict:
 
 # --------------------------------------------------------------- где лежит модель
 def find_model_file(folder: Path) -> Path | None:
-    """Книга модели в папке data/: model.xlsx, «Модели_справедливой_стоимости.xlsx» или единственный .xlsx."""
+    """Книга модели в папке: model.xlsx, «Модели_справедливой_стоимости.xlsx» или единственный .xlsx."""
     for name in MODEL_NAMES:
         p = folder / name
         if p.exists():
             return p
-    files = sorted(folder.glob("*.xlsx"))
+    files = sorted(f for f in folder.glob("*.xlsx") if not f.name.startswith(("chat_", "~$")))
     return files[0] if len(files) == 1 else None
 
 
-def load_bundled(bundled: Path) -> dict:
-    """Модель из репозитория: сначала Excel-книга, если её нет или она не читается — levels.json."""
-    xlsx = find_model_file(bundled)
-    if xlsx is not None:
+def load_bundled(dirs: list[Path] | Path) -> dict:
+    """Модель из репозитория: сначала Excel-книга, если её нет или она не читается — levels.json.
+
+    Ищет по очереди в data/, в корне репозитория и в запасной копии advisor/data/.
+    """
+    dirs = [dirs] if isinstance(dirs, Path) else dirs
+    problems = []
+    for d in dirs:
+        xlsx = find_model_file(d) if d.exists() else None
+        if xlsx is None:
+            continue
         try:
             lv = parse_workbook(xlsx)
             lv["source"] = xlsx.name
             lv["_xlsx"] = str(xlsx)
+            lv["_where"] = str(xlsx.parent)
             lv["_origin"] = "github"
             return lv
         except ModelFileError as e:
-            fallback_error = str(e)
-        else:
-            fallback_error = ""
-    else:
-        fallback_error = ""
-    p = bundled / "levels.json"
-    if not p.exists():
-        raise FileNotFoundError("в data/ нет ни книги модели, ни levels.json")
-    lv = json.loads(p.read_text(encoding="utf-8"))
-    lv.setdefault("version", hashlib.sha1(p.read_bytes()).hexdigest()[:12])
-    lv["_origin"] = "github"
-    if fallback_error:
-        lv["_warning"] = f"книгу в репозитории прочитать не удалось ({fallback_error}), взял levels.json"
-    return lv
+            problems.append(f"{xlsx.name}: {e}")
+    for d in dirs:
+        p = d / "levels.json"
+        if not p.exists():
+            continue
+        lv = json.loads(p.read_text(encoding="utf-8"))
+        lv.setdefault("version", hashlib.sha1(p.read_bytes()).hexdigest()[:12])
+        lv["_origin"] = "github"
+        lv["_where"] = str(d)
+        if problems:
+            lv["_warning"] = "книгу модели прочитать не удалось (" + "; ".join(problems) + "), взял levels.json"
+        return lv
+    raise FileNotFoundError("не нашёл ни книги модели (model.xlsx), ни levels.json")
 
 
 def load_override(data_dir: Path) -> dict | None:
     """Модель, присланная в чат (живёт на диске хостинга, пока в GitHub не появится новая)."""
-    p = data_dir / "levels.json"
+    p = data_dir / "chat_levels.json"
     if not p.exists():
         return None
     lv = json.loads(p.read_text(encoding="utf-8"))
     lv["_origin"] = "chat"
-    x = data_dir / "model.xlsx"
+    x = data_dir / "chat_model.xlsx"
     if x.exists():
         lv["_xlsx"] = str(x)
     return lv
@@ -227,12 +234,12 @@ def load_override(data_dir: Path) -> dict | None:
 
 def save_override(levels: dict, data: bytes, data_dir: Path) -> None:
     clean = {k: v for k, v in levels.items() if not k.startswith("_")}
-    (data_dir / "levels.json").write_text(json.dumps(clean, ensure_ascii=False, indent=1), encoding="utf-8")
-    (data_dir / "model.xlsx").write_bytes(data)
+    (data_dir / "chat_levels.json").write_text(json.dumps(clean, ensure_ascii=False, indent=1), encoding="utf-8")
+    (data_dir / "chat_model.xlsx").write_bytes(data)
 
 
 def drop_override(data_dir: Path) -> None:
-    for name in ("levels.json", "model.xlsx"):
+    for name in ("chat_levels.json", "chat_model.xlsx"):
         p = data_dir / name
         if p.exists():
             p.unlink()
@@ -248,9 +255,8 @@ def snapshot(levels: dict) -> dict:
     }
 
 
-def load_aliases(bundled: Path) -> dict:
-    p = bundled / "aliases.json"
-    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+def load_aliases(path: Path | None) -> dict:
+    return json.loads(path.read_text(encoding="utf-8")) if path and path.exists() else {}
 
 
 def diff_levels(old: dict, new: dict) -> list[str]:
