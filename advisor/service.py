@@ -60,13 +60,9 @@ class Advisor:
         self.storage = storage or Storage(cfg.db_path)
         self.judge = judge or NewsJudge(cfg)
         self.problems: list[str] = []
+        # названия компаний и ленты: из .json, если он есть на сервере, иначе встроенные в код (advisor/defaults.py)
         self.aliases = load_aliases(cfg.find_file("aliases.json"))
-        if not self.aliases:
-            self.problems.append("нет файла aliases.json — новости по компаниям искать не по чему")
-        feeds_path = cfg.find_file("feeds.json")
-        if feeds_path is None:
-            self.problems.append("нет файла feeds.json — беру ленты по умолчанию (РБК, Интерфакс, Google News)")
-        self.feeds = news.load_feeds(feeds_path)
+        self.feeds = news.load_feeds(cfg.find_file("feeds.json"))
         self.matcher = news.Matcher(self.aliases)
         try:
             self.levels = self.select_model()

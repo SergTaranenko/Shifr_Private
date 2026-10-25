@@ -256,7 +256,11 @@ def snapshot(levels: dict) -> dict:
 
 
 def load_aliases(path: Path | None) -> dict:
-    return json.loads(path.read_text(encoding="utf-8")) if path and path.exists() else {}
+    if path and path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
+    from .defaults import ALIASES
+
+    return ALIASES
 
 
 def diff_levels(old: dict, new: dict) -> list[str]:

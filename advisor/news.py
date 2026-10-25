@@ -18,18 +18,12 @@ from .config import MSK
 UA = {"User-Agent": "Mozilla/5.0 (portfolio-advisor-bot/1.0)"}
 
 
-DEFAULT_FEEDS = {
-    "general": [{"name": "РБК", "url": "https://rssexport.rbc.ru/rbcnews/news/30/full.rss"},
-                {"name": "Интерфакс", "url": "https://www.interfax.ru/rss.asp"}],
-    "google_news": True,
-    "google_news_template": "https://news.google.com/rss/search?q={query}+when:2d&hl=ru&gl=RU&ceid=RU:ru",
-}
-
-
 def load_feeds(path: Path | None) -> dict:
     if path and path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
-    return DEFAULT_FEEDS
+    from .defaults import FEEDS
+
+    return FEEDS
 
 
 def feed_urls(feeds: dict, aliases: dict) -> list[dict]:
